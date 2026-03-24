@@ -1,0 +1,310 @@
+import React, { useState, useMemo, useEffect } from 'react';
+import { 
+  Calendar, 
+  Clock, 
+  TrendingUp, 
+  ArrowUpRight, 
+  FileText, 
+  AlertCircle, 
+  Search,
+  Filter,
+  Activity,
+  ChevronRight
+} from 'lucide-react';
+
+// 定義今日日期 (根據 CSV 檔名 115.3.23，設定為 2026-03-24 作為當前分析基準)
+const TODAY = new Date('2026-03-24');
+
+const App = () => {
+  const [data, setData] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('new5');
+  const [searchTerm, setSearchTerm] = useState('');
+
+  // 模擬讀取 CSV 資料 (實務上這會解析上傳的文件)
+  useEffect(() => {
+    // 這裡放入你提供的 CSV 範例片段進行解析演示
+    const rawCSV = `債券代號,標的債券,發行日期,到期日,發行量(億),流通餘額(張數),餘額比例,TCRI,擔保情形,轉換價格,轉換標的代碼,標的股票市價,標的股票歷史波動率(65D),可轉債市價,可轉債日均量(5D),可轉債日均量(20D),可轉債成交量,轉換比例,轉換價值,價內外程度,溢(折)價率,最新賣回日,最新賣回價,期間,賣回收益率,扣10%利息所得稅,停止轉換起日,停止轉換迄日,強制贖回日,重設轉換價(反稀釋),重設轉換日,重設價格
+11011,台泥一永,2024/12/10,2029/12/10,80,80000,100,4,無,35.2,1101,22.8,26.63,97.45,27.6,18.1,11,2.84,64.75,-35.23,50.50,2027/12/10,100,1.72,1.52,1.52,2026/03/24,2026/05/22,,,
+12561,鮮活果汁一KY,2025/10/08,2028/10/08,2,23.5,34.53,98.9,0.2,0.65,0,2.109,49.56,-50.42,99.55,2026/08/21,102.01,0.41,7.60,7.11,2026/04/28,2026/06/26,,,
+89964,高力四,2023/12/06,2028/12/06,10,558,5.58,5,無,233.5,8996,820,77.61,417,15.2,5.3,15,0.428,350.96,251.18,18.82,2026/12/06,100.7519,0.71,-,-,2026/03/10,2026/04/04,,即將重設,2026/04/04,232.2
+98026,鈺齊六KY,2024/11/15,2027/11/15,10,9998,99.98,4,無,104.1,9802,80.3,24.68,105.5,17,22.4,0,0.96,77.14,-25.9,36.77,2026/11/15,100,0.64,0.3,0.3,2025/08/17,2025/10/16,,,
+62852,啟碁二,2026/03/19,2029/03/19,10,10000,100,3,無,150,6285,145,25.5,108.5,50,45,30,0.67,96.67,-3.33,12.24,2028/03/19,102,2.0,1.5,1.5,2026/06/19,2026/08/19,,,
+62853,啟碁三,2026/03/10,2029/03/10,10,10000,100,3,無,150,6285,145,25.5,110.2,120,100,80,0.67,96.67,-3.33,13.99,2028/03/10,102,2.0,1.5,1.5,2026/06/10,2026/08/10,,,
+23301,台積一,2025/03/26,2027/03/26,50,4500,90,1,無,800,2330,950,22.1,125.5,200,180,150,0.125,118.75,18.75,5.68,2027/03/26,100,1.0,0.5,0.5,2026/03/24,2026/05/22,,,
+30374,欣興四,2025/04/20,2027/04/20,20,18000,90,4,無,180,3037,175,30.5,102.3,80,75,60,0.56,97.22,-2.78,5.22,2027/04/20,101,1.07,1.0,1.0,2026/07/20,2026/09/20,,,
+`;
+
+    const lines = rawCSV.trim().split('\n');
+    const headers = lines[0].split(',');
+    const parsedData = lines.slice(1).map(line => {
+      const values = line.split(',');
+      const obj = {};
+      headers.forEach((header, index) => {
+        obj[header] = values[index];
+      });
+      return obj;
+    });
+    setData(parsedData);
+    setLoading(false);
+  }, []);
+
+  // 日期處理函數
+  const getDiffDays = (dateStr) => {
+    if (!dateStr) return null;
+    const date = new Date(dateStr);
+    const diffTime = TODAY - date;
+    return Math.floor(diffTime / (1000 * 60 * 60 * 24));
+  };
+
+  const getDaysToMaturity = (dateStr) => {
+    if (!dateStr) return null;
+    const date = new Date(dateStr);
+    const diffTime = date - TODAY;
+    return Math.floor(diffTime / (1000 * 60 * 60 * 24));
+  };
+
+  // 核心篩選邏輯
+  const filteredCategories = useMemo(() => {
+    // 共用條件：轉換價值 > 85 且 剩餘比例 > 30
+    const baseFilter = (item) => {
+      const convValue = parseFloat(item['轉換價值']) || 0;
+      const remainRatio = parseFloat(item['餘額比例']) || 0;
+      return convValue > 85 && remainRatio > 30;
+    };
+
+    const searchFilter = (item) => {
+      if (!searchTerm) return true;
+      return item['標的債券'].includes(searchTerm) || item['債券代號'].includes(searchTerm);
+    };
+
+    const list = data.filter(baseFilter).filter(searchFilter);
+
+    return {
+      // 1. 上市第 5 天 (以今日基準回推)
+      new5: list.filter(item => getDiffDays(item['發行日期']) === 5),
+      
+      // 2. 上市 30 天以內
+      new30: list.filter(item => {
+        const diff = getDiffDays(item['發行日期']);
+        return diff >= 0 && diff <= 30;
+      }),
+      
+      // 3. 發行日期將滿 1 年 (發行日後的 335 ~ 365 天)
+      year1: list.filter(item => {
+        const diff = getDiffDays(item['發行日期']);
+        return diff >= 335 && diff <= 365;
+      }),
+      
+      // 4. 離到期日剩不到 1 年 (到期日前的 365 ~ 395 天，即將進入最後一年)
+      due1: list.filter(item => {
+        const daysToDue = getDaysToMaturity(item['到期日']);
+        return daysToDue >= 335 && daysToDue <= 365;
+      })
+    };
+  }, [data, searchTerm]);
+
+  const tabs = [
+    { id: 'new5', label: '上市第 5 天', icon: Clock, color: 'bg-blue-500', count: filteredCategories.new5.length },
+    { id: 'new30', label: '上市 30 天內', icon: TrendingUp, color: 'bg-green-500', count: filteredCategories.new30.length },
+    { id: 'year1', label: '發行將滿 1 年', icon: Calendar, color: 'bg-orange-500', count: filteredCategories.year1.length },
+    { id: 'due1', label: '到期剩不到 1 年', icon: AlertCircle, color: 'bg-red-500', count: filteredCategories.due1.length },
+  ];
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-slate-50">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
+
+  const activeData = filteredCategories[activeTab] || [];
+
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans p-4 md:p-8">
+      {/* Header */}
+      <div className="max-w-7xl mx-auto mb-8">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold text-slate-800 flex items-center gap-2">
+              <Activity className="text-blue-600" />
+              CB 智慧篩選分析系統
+            </h1>
+            <p className="text-slate-500 mt-1">
+              分析基準日：{TODAY.toLocaleDateString()} | 篩選條件：轉換價值 &gt; 85 & 剩餘比例 &gt; 30%
+            </p>
+          </div>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
+            <input 
+              type="text" 
+              placeholder="搜尋代號或名稱..."
+              className="pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 w-full md:w-64 transition-all"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Summary Cards / Tabs */}
+      <div className="max-w-7xl mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`relative overflow-hidden group p-5 rounded-2xl transition-all duration-300 ${
+              activeTab === tab.id 
+              ? 'bg-white shadow-xl shadow-slate-200 ring-2 ring-blue-500 -translate-y-1' 
+              : 'bg-white border border-slate-200 hover:shadow-lg hover:-translate-y-0.5'
+            }`}
+          >
+            <div className="flex items-start justify-between">
+              <div className={`p-3 rounded-xl ${tab.color} text-white shadow-lg shadow-opacity-20`}>
+                <tab.icon size={24} />
+              </div>
+              <span className={`text-2xl font-bold ${activeTab === tab.id ? 'text-slate-800' : 'text-slate-400'}`}>
+                {tab.count}
+              </span>
+            </div>
+            <div className="mt-4 text-left">
+              <h3 className="font-semibold text-slate-700">{tab.label}</h3>
+              <p className="text-xs text-slate-400 mt-1">點擊切換詳細列表</p>
+            </div>
+            {activeTab === tab.id && (
+              <div className="absolute bottom-0 left-0 w-full h-1 bg-blue-500"></div>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* Data Table Section */}
+      <div className="max-w-7xl mx-auto">
+        <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
+          <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+            <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+              <Filter className="text-blue-500 w-5 h-5" />
+              {tabs.find(t => t.id === activeTab)?.label} 標的列表
+            </h2>
+            <span className="px-3 py-1 bg-white border border-slate-200 rounded-full text-xs font-medium text-slate-500">
+              共 {activeData.length} 筆
+            </span>
+          </div>
+
+          <div className="overflow-x-auto">
+            {activeData.length > 0 ? (
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50/50 text-slate-500 text-sm uppercase tracking-wider">
+                    <th className="px-6 py-4 font-semibold">債券資訊</th>
+                    <th className="px-6 py-4 font-semibold">市價</th>
+                    <th className="px-6 py-4 font-semibold">轉換價值</th>
+                    <th className="px-6 py-4 font-semibold">溢價率</th>
+                    <th className="px-6 py-4 font-semibold">剩餘比例</th>
+                    <th className="px-6 py-4 font-semibold">日期區間</th>
+                    <th className="px-6 py-4 font-semibold text-center">操作</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {activeData.map((item, idx) => (
+                    <tr key={idx} className="hover:bg-blue-50/30 transition-colors group">
+                      <td className="px-6 py-4">
+                        <div className="flex flex-col">
+                          <span className="font-bold text-slate-800">{item['標的債券']}</span>
+                          <span className="text-xs text-slate-400 font-mono tracking-tighter">{item['債券代號']}</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex flex-col">
+                          <span className="font-bold text-blue-600">{item['可轉債市價']}</span>
+                          <span className="text-[10px] text-slate-400">最新收盤價</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className={`px-2 py-1 rounded-md text-sm font-semibold ${parseFloat(item['轉換價值']) > 100 ? 'bg-rose-50 text-rose-600' : 'bg-slate-100 text-slate-700'}`}>
+                          {item['轉換價值']}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 font-medium text-slate-600">
+                        {item['溢(折)價率']}%
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="w-full max-w-[100px] bg-slate-100 h-1.5 rounded-full overflow-hidden mt-1">
+                          <div 
+                            className={`h-full rounded-full ${parseFloat(item['餘額比例']) < 40 ? 'bg-orange-400' : 'bg-blue-500'}`}
+                            style={{ width: `${item['餘額比例']}%` }}
+                          ></div>
+                        </div>
+                        <span className="text-xs text-slate-500 mt-1 block">{item['餘額比例']}%</span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex flex-col text-xs text-slate-500">
+                          <div className="flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-green-400"></span>
+                            {item['發行日期']}
+                          </div>
+                          <div className="flex items-center gap-1 mt-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-slate-300"></span>
+                            {item['到期日']}
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        <button className="p-2 hover:bg-white rounded-lg border border-transparent hover:border-slate-200 transition-all">
+                          <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-blue-500" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <div className="py-20 flex flex-col items-center justify-center text-slate-400">
+                <FileText size={48} className="mb-4 opacity-20" />
+                <p>目前沒有符合條件的標的</p>
+                <p className="text-xs mt-1">試著調整篩選條件或搜尋關鍵字</p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Footer / Notes */}
+      <footer className="max-w-7xl mx-auto mt-12 pb-8">
+        <div className="bg-slate-800 rounded-3xl p-8 text-white relative overflow-hidden shadow-2xl">
+          <div className="relative z-10 flex flex-col md:flex-row gap-8 justify-between">
+            <div className="md:w-1/2">
+              <h4 className="text-lg font-bold mb-4 flex items-center gap-2 text-blue-400">
+                <TrendingUp className="w-5 h-5" />
+                篩選策略說明
+              </h4>
+              <ul className="space-y-3 text-sm text-slate-400">
+                <li className="flex gap-2">
+                  <span className="text-blue-400">●</span>
+                  <b>上市黃金期：</b> 觀察剛上市 5 天與 30 天內的標的，尋找新上市的套利或成長機會。
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-blue-400">●</span>
+                  <b>重設權利：</b> 發行滿 1 年通常伴隨著賣回權利或價格重設條款。
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-blue-400">●</span>
+                  <b>到期壓力：</b> 離到期剩不到 1 年的標的，需注意強制贖回與價格收斂風險。
+                </li>
+              </ul>
+            </div>
+            <div className="md:w-1/3 bg-slate-700/50 rounded-2xl p-6 border border-slate-600">
+              <p className="text-xs text-slate-400 leading-relaxed italic">
+                免責聲明：本系統僅供數據整理參考，不代表任何投資建議。可轉債投資涉及流動性風險、違約風險及轉換溢價風險，操作前請務必參閱公開說明書。
+              </p>
+            </div>
+          </div>
+          <div className="absolute top-0 right-0 w-64 h-64 bg-blue-600/10 rounded-full -translate-y-1/2 translate-x-1/2 blur-3xl"></div>
+        </div>
+      </footer>
+    </div>
+  );
+};
+
+export default App;
